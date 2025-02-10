@@ -120,7 +120,7 @@ lr = 0.1
 batch_sizes = 1714
 epoch = 200
 
-sequence_feature, sequence_label= load_data("D:\Al-ion\\1-train.xlsx")
+sequence_feature, sequence_label= load_data()
 dataset = data.TensorDataset(sequence_feature, sequence_label)
 dataloader = DataLoader(dataset, batch_size= batch_sizes, shuffle=False, drop_last=True)
 
@@ -136,12 +136,10 @@ for i in range(epoch):
     for datas in dataloader:
         optimizer.zero_grad()
         feature, label = datas
-        feature = feature.float()
-        label = label.float()
-        feature = feature.cuda()
-        label = label.cuda()
+        feature = feature.float().cuda()
+        label = label.float().cuda()
         output = emodel(feature)
-        print(f"预测输出{output}")
+        print(f"prediction:{output}")
         label = label.reshape(batch_sizes, -1)
         train_loss = loss(output, label)
         print(train_loss)
@@ -149,7 +147,7 @@ for i in range(epoch):
         train_loss.backward()
         optimizer.step()
 
-sequence_feature1, sequence_label1= load_data("D:\Al-ion\\1-test.xlsx")
+sequence_feature1, sequence_label1= load_data()
 dataset1 = data.TensorDataset(sequence_feature1, sequence_label1)
 
 emodel.eval()
@@ -167,25 +165,35 @@ with torch.no_grad():
         output = output.cpu()
         print(output, output.shape)
         output_list.append(output.item())
-    print(output_list)
 
-def plot():
-    plt.figure(figsize=(5, 4))
+def plot(x_label :int, y_label: int):
+    plt.figure(figsize=(x_label, y_label))
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.grid(visible=True, which="major", linestyle="-", linewidth=1.5)
+    plt.grid(visible=True, which="minor", linestyle="--", alpha=0.5, linewidth=1.5)
+    plt.minorticks_on()
     x1 = torch.arange(0, len(train_loss_list))
-    plt0 = plt.plot(x1, train_loss_list, color="r")
+    plt_loss = plt.plot(x1, train_loss_list, color="green", label="train loss", linewidth=1, linestyle="-")
     ax1 = plt.gca()
     ax1.set_title("train_loss", fontsize=20)
-    ax1.set_xlabel("batch", fontsize=20)
+    ax1.set_xlabel("step", fontsize=20)
     ax1.set_ylabel("loss", fontsize=20)
-    plt.figure(figsize=(5, 4))
-    x3 = torch.arange(len(output_list))
-    x2 = torch.arange(len(label_list))
-    plt1 = plt.plot(x3, output_list, color="b")
+    plt.tick_params(labelsize=15)
+
+    plt.figure(figsize=(x_label, y_label))
+    plt.grid(visible=True, which="major", linestyle="-", linewidth=1.5)
+    plt.grid(visible=True, which="minor", linestyle="--", alpha=0.5, linewidth=1.5)
+    plt.minorticks_on()
+    x3 = torch.arange(len(output_list)) + 1
+    x2 = torch.arange(len(label_list)) + 1
+    plt_pred = plt.plot(x3, output_list, color="red", label="prediction", linewidth=2, linestyle="--")
     ax2 = plt.gca()
-    ax2.set_title("prediction", fontsize=20)
-    ax2.set_xlabel("cycle", fontsize=20)
-    ax2.set_ylabel("capacity", fontsize=20)
+    ax2.set_title("prediction", fontsize=22)
+    ax2.set_xlabel("Cycle", fontsize=25)
+    ax2.set_ylabel("Capacity(mAh/g)", fontsize=25)
     print(len(output_list))
-    print(x3)
-    plt2 = plt.plot(x2, label_list, color="r")
+    plt_data = plt.plot(x2, label_list, color="dodgerblue", label="data", linewidth=2, linestyle="-")
+    plt.tick_params(labelsize=15)
+    plt.legend(prop={"size": 20})
     plt.show()
+

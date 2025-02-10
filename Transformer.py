@@ -1,4 +1,4 @@
-import math
+import math, random
 import pandas as pd
 import torch
 from matplotlib import pyplot as plt
@@ -7,7 +7,6 @@ from d2l import torch as d2l
 from torch.utils import data
 from torch.utils.data import DataLoader
 
-# 多头自注意力机制中，头数目为2。
 def scaled_dot_product(q, k, v, mask = None):
     dim_k = q.size()[-1]
     qk_dot_product = torch.matmul(q, k.transpose(-2, -1))
@@ -57,7 +56,6 @@ class AddNorm(nn.Module):
         return self.norm(tensors + self.dropout(self.sublayer(tensors, *args, **kwargs)))
 
 class PositionalEncoding(nn.Module):
-    # 位置编码，在输入序列中加入位置信息
     def __init__(self, num_hiddens, dropout=0.1, max_len=1000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(dropout)
@@ -86,7 +84,6 @@ class TransformerEncoderLayer(nn.Module):
             dim=input_dim,
             dropout_rate=dropout_rate
         )
-
     def forward(self, src, mask=None):
         output = self.multi_head_attention(src, src, src, mask)
         final_output = self.feedforward_network(output)
@@ -162,15 +159,130 @@ class Transformer_Encoder_Decoder(nn.Module):
             feedforward_dim=feedforward_dim,
             dropout_rate=dropout_rate
         )
-    def forward(self, src_input, target, mask):
+    def forward(self, src_input, mask):
         enc_output = self.encoder(src_input)
-        return self.decoder(target, enc_output, mask)[:, -1, :]
+        return self.decoder(src_input, enc_output, mask)
 
-# sequence mask:并行训练时，保证自注意力层的当前时间步的输出只能看到其之前的输入。
 def get_masks(timestep):
-    return torch.tril(torch.ones(timestep, timestep), diagonal=0).bool()
+    return torch.tril(torch.ones(timestep, timestep), diagonal=1)
+
+def flip_from_probability(param):
+    return True if random.random() < param else False
+
+time_step = 10
+hidden_sizes = 10
+num_layers = 8
 
 def init_weights(m):
     if type(m) == nn.Linear or type(m) == nn.Conv1d:
         nn.init.xavier_uniform_(m.weight)
 
+def load_data(path):
+    df = pd.read_excel(path).values
+    dataset = torch.from_numpy(df)
+    timestep = time_step
+    sequence_feature_list = []
+    for index in range(len(dataset) - timestep - 1):
+        sequence_feature_list.append(dataset[index: index + timestep])
+    sequence_feature = torch.stack(sequence_feature_list)
+    sequence_label_list = []
+    for index in range(len(dataset) - timestep - 1):
+        sequence_label_list.append(dataset[index + 1: index + timestep + 1, 3])
+    sequence_label = torch.stack(sequence_label_list)
+    return sequence_feature, sequence_label
+
+lr = 0.007
+batch_sizes = 1714
+epoch = 30
+param = 60
+
+sequence_feature, sequence_label= load_data("D:\\Al-ion\\transformer\\1-train.xlsx")
+dataset = data.TensorDataset(sequence_feature, sequence_label)
+dataloader = DataLoader(dataset, batch_size= batch_sizes, shuffle=False, drop_last=True)
+emodel = Transformer_Encoder_Decoder(
+    num_layer=num_layers, input_dim=4, num_heads=2, feedforward_dim=10, dropout_rate=0.1).to(device=torch.device('cuda'))
+emodel.apply(init_weights)
+loss = nn.MSELoss().to(device=torch.device('cuda'))
+optimizer = torch.optim.Adam(emodel.parameters(), lr, weight_decay=0.01)
+label_list = []
+
+emodel.train()
+train_loss_list = []
+for i in range(epoch):
+    count = 0
+    for datas in dataloader:
+        count = count + 1
+        optimizer.zero_grad()
+        feature, label = datas
+        feature = feature.float().cuda()
+        label = label.float().cuda()
+        print(f"feature_shape：{feature.shape}, label_shape：{label.shape}")
+        output = emodel(feature, get_masks(time_step).cuda())
+        print(f"prediction:{output}，shape：{output.shape}")
+        # =============计划抽样==================================
+        if count < 100:
+            prob_true_val = True
+        else:
+            value = param / (param + math.exp(epoch / param))
+            prob_true_val = flip_from_probability(value)
+        if prob_true_val != True:
+            feature = torch.cat((feature[:, :, 0:3], output), dim=-1)
+        # =======================================================
+        label = label.reshape(batch_sizes, time_step, -1)
+        train_loss = loss(output, label)
+        print(f"loss:{train_loss}")
+        train_loss_list.append(train_loss.item())
+        train_loss.backward()
+        optimizer.step()
+
+sequence_feature1, sequence_label1= load_data("D:\\Al-ion\\transformer\\1-test.xlsx")
+dataset1 = data.TensorDataset(sequence_feature1, sequence_label1)
+
+emodel.eval()
+with torch.no_grad():
+    output_list = []
+    test_dataloader = DataLoader(dataset1, batch_size=1, shuffle=False, drop_last=True)
+    for datas in test_dataloader:
+        feature, label = datas
+        print(feature.shape, label.shape)
+        label = label[0, -1]
+        label_list.append(label.item())
+        feature = feature.float().cuda()
+        label = label.float().cuda()
+        output = emodel(feature, None)
+        output = output[0, -1].cpu()
+        print(output, output.shape)
+        output_list.append(output.item())
+
+def plot(x_label :int, y_label: int):
+    plt.figure(figsize=(x_label, y_label))
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.grid(visible=True, which="major", linestyle="-", linewidth=1.5)
+    plt.grid(visible=True, which="minor", linestyle="--", alpha=0.5, linewidth=1.5)
+    plt.minorticks_on()
+    x1 = torch.arange(0, len(train_loss_list))
+    plt_loss = plt.plot(x1, train_loss_list, color="green", label="train loss", linewidth=1, linestyle="-")
+    ax1 = plt.gca()
+    ax1.set_title("train_loss", fontsize=20)
+    ax1.set_xlabel("step", fontsize=20)
+    ax1.set_ylabel("loss", fontsize=20)
+    plt.tick_params(labelsize=15)
+
+    plt.figure(figsize=(x_label, y_label))
+    plt.grid(visible=True, which="major", linestyle="-", linewidth=1.5)
+    plt.grid(visible=True, which="minor", linestyle="--", alpha=0.5, linewidth=1.5)
+    plt.minorticks_on()
+    x3 = torch.arange(len(output_list)) + 1
+    x2 = torch.arange(len(label_list)) + 1
+    plt_pred = plt.plot(x3, output_list, color="red", label="prediction", linewidth=2, linestyle="--")
+    ax2 = plt.gca()
+    ax2.set_title("prediction", fontsize=22)
+    ax2.set_xlabel("Cycle", fontsize=25)
+    ax2.set_ylabel("Capacity(mAh/g)", fontsize=25)
+    print(len(output_list))
+    plt_data = plt.plot(x2, label_list, color="dodgerblue", label="data", linewidth=2, linestyle="-")
+    plt.tick_params(labelsize=15)
+    plt.legend(prop={"size": 20})
+    plt.show()
+
+plot(12, 10)
